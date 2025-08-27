@@ -1,0 +1,64 @@
+name: Build & Package MasterSuite (Windows)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up CMake
+        uses: jwlawson/actions-setup-cmake@v1.13
+
+      - name: Install Chocolatey packages (NSIS)
+        shell: cmd
+        run: |
+          choco install nsis -y
+          choco install python3 -y
+
+      - name: Clone JUCE
+        run: git clone --depth 1 https://github.com/juce-framework/JUCE.git ../JUCE
+
+      - name: Configure (CMake)
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DJUCE_DIR=../JUCE
+
+      - name: Build (Release)
+        run: cmake --build build --config Release --parallel
+
+      - name: Find built VST3
+        id: findvst
+        run: |
+          echo "Searching for MasterSuite.vst3..."
+          for /R build %%f in ("*.vst3") do echo "FOUND: %%f" & set "VSTPATH=%%f"
+          if defined VSTPATH ( echo "VSTPATH=%VSTPATH%" & echo "::set-output name=path::%VSTPATH%" ) else ( echo "No vst3 found" & exit 1 )
+        shell: cmd
+
+      - name: Prepare installer folder
+        run: |
+          md installer_build
+          if exist "%VSTPATH%" copy "%VSTPATH%" installer_build\\MasterSuite.vst3
+        shell: cmd
+
+      - name: Copy NSIS script
+        run: copy installer\\MasterSuiteInstaller.nsi installer_build\\MasterSuiteInstaller.nsi
+        shell: cmd
+
+      - name: Run NSIS to create installer
+        working-directory: installer_build
+        run: |
+          "C:\\Program Files (x86)\\NSIS\\makensis.exe" MasterSuiteInstaller.nsi
+        shell: cmd
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MasterSuite-Installer-Windows
+          path: installer_build\\MasterSuite_Installer.exe
